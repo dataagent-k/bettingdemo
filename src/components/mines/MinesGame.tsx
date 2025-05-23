@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { MinesGameState, GameSettings } from '@/types/mines';
-import { startNewGame, revealTile, cashOut } from '@/lib/mines-game';
+import { startNewGame, revealTile, cashOut, updateGameWithNashAnalysis } from '@/lib/mines-game';
 import { useGame } from '@/contexts/GameContext';
 import { soundManager } from '@/lib/sounds';
 import MinesGrid from './MinesGrid';
 import GameStats from './GameStats';
+import StrategyAdvisor from './StrategyAdvisor';
 
 export default function MinesGame() {
   const { balance, updateBalance, addToHistory } = useGame();
@@ -20,6 +21,8 @@ export default function MinesGame() {
     gridSize: 25,
     mineCount: 5,
     betAmount: 10,
+    enableNashAdvisor: true,
+    strategyMode: 'balanced',
   });
 
   const handleStartGame = useCallback(() => {
@@ -36,7 +39,7 @@ export default function MinesGame() {
   const handleTileClick = useCallback((tileId: number) => {
     if (!gameState) return;
 
-    const newGameState = revealTile(gameState, tileId);
+    const newGameState = revealTile(gameState, tileId, settings);
     setGameState(newGameState);
 
     if (newGameState.gameStatus === 'lost') {
@@ -48,6 +51,12 @@ export default function MinesGame() {
         revealedTiles: newGameState.revealedCount,
         result: 'loss',
         payout: 0,
+        nashMetrics: newGameState.nashEquilibrium ? {
+          followedRecommendation: newGameState.strategyRecommendation?.action !== 'reveal' ||
+                                  newGameState.strategyRecommendation?.tileId !== tileId,
+          deviationScore: newGameState.gameTheoryMetrics?.deviationFromEquilibrium || 0,
+          optimalPayout: newGameState.nashEquilibrium.equilibriumPoint.playerExpectedValue,
+        } : undefined,
       });
       setTimeout(() => {
         alert(`Game Over! You hit a mine. Lost $${settings.betAmount}`);
@@ -63,6 +72,11 @@ export default function MinesGame() {
         revealedTiles: newGameState.revealedCount,
         result: 'win',
         payout,
+        nashMetrics: newGameState.nashEquilibrium ? {
+          followedRecommendation: true, // Auto cash-out is always optimal when winning
+          deviationScore: newGameState.gameTheoryMetrics?.deviationFromEquilibrium || 0,
+          optimalPayout: newGameState.nashEquilibrium.equilibriumPoint.playerExpectedValue,
+        } : undefined,
       });
       setTimeout(() => {
         alert(`Congratulations! You won $${payout.toFixed(2)}!`);
@@ -83,6 +97,11 @@ export default function MinesGame() {
         revealedTiles: gameState.revealedCount,
         result: 'win',
         payout,
+        nashMetrics: gameState.nashEquilibrium ? {
+          followedRecommendation: gameState.strategyRecommendation?.action === 'cashOut',
+          deviationScore: gameState.gameTheoryMetrics?.deviationFromEquilibrium || 0,
+          optimalPayout: gameState.nashEquilibrium.equilibriumPoint.playerExpectedValue,
+        } : undefined,
       });
       setGameState(prev => prev ? { ...prev, gameStatus: 'won' } : null);
       alert(`Cashed out! You won $${payout.toFixed(2)}!`);
@@ -92,6 +111,26 @@ export default function MinesGame() {
   const handleNewGame = useCallback(() => {
     setGameState(null);
   }, []);
+
+  const handleStrategyModeChange = useCallback((mode: 'conservative' | 'balanced' | 'aggressive') => {
+    setSettings(prev => ({ ...prev, strategyMode: mode }));
+
+    // Update current game state with new strategy if game is active
+    if (gameState && gameState.gameStatus === 'playing') {
+      const updatedGameState = updateGameWithNashAnalysis(gameState, { ...settings, strategyMode: mode });
+      setGameState(updatedGameState);
+    }
+  }, [gameState, settings]);
+
+  const handleToggleNashAdvisor = useCallback(() => {
+    setSettings(prev => ({ ...prev, enableNashAdvisor: !prev.enableNashAdvisor }));
+
+    // Update current game state if toggling advisor
+    if (gameState && gameState.gameStatus === 'playing') {
+      const updatedGameState = updateGameWithNashAnalysis(gameState, { ...settings, enableNashAdvisor: !settings.enableNashAdvisor });
+      setGameState(updatedGameState);
+    }
+  }, [gameState, settings]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -129,9 +168,9 @@ export default function MinesGame() {
   const canCashOut = gameState?.gameStatus === 'playing' && gameState.revealedCount > 0;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
       {/* Game Controls */}
-      <div className="lg:col-span-1 space-y-6">
+      <div className="xl:col-span-1 space-y-6">
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
             <CardTitle className="text-white">Game Settings</CardTitle>
@@ -190,6 +229,19 @@ export default function MinesGame() {
               </div>
             </div>
 
+            {/* Nash Advisor Toggle */}
+            <div>
+              <Label className="text-slate-300 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.enableNashAdvisor}
+                  onChange={handleToggleNashAdvisor}
+                  className="rounded"
+                />
+                Enable Nash Strategy Advisor
+              </Label>
+            </div>
+
             <div className="space-y-2">
               {canStartGame ? (
                 <Button
@@ -224,8 +276,19 @@ export default function MinesGame() {
         {gameState && <GameStats gameState={gameState} />}
       </div>
 
+      {/* Nash Strategy Advisor */}
+      {settings.enableNashAdvisor && (
+        <div className="xl:col-span-1 space-y-6">
+          <StrategyAdvisor
+            gameState={gameState || {} as MinesGameState}
+            onStrategyModeChange={handleStrategyModeChange}
+            currentStrategyMode={settings.strategyMode}
+          />
+        </div>
+      )}
+
       {/* Game Grid */}
-      <div className="lg:col-span-2">
+      <div className={settings.enableNashAdvisor ? "xl:col-span-2" : "xl:col-span-3"}>
         <Card className="bg-slate-800/50 border-slate-700">
           <CardHeader>
             <div className="flex justify-between items-center">

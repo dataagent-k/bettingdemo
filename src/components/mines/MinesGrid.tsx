@@ -15,6 +15,11 @@ export default function MinesGrid({ gameState, onTileClick }: MinesGridProps) {
 
   const getTileContent = (tile: any) => {
     if (!tile.isRevealed) {
+      // Show Nash probability if available
+      if (tile.nashProbability !== undefined && gameState.nashEquilibrium) {
+        const percentage = Math.round(tile.nashProbability * 100);
+        return `${percentage}%`;
+      }
       return '?';
     }
 
@@ -26,12 +31,21 @@ export default function MinesGrid({ gameState, onTileClick }: MinesGridProps) {
   };
 
   const getTileClassName = (tile: any) => {
-    const baseClasses = "w-16 h-16 text-lg font-bold transition-all duration-300 transform hover:scale-105 active:scale-95";
+    const baseClasses = "w-16 h-16 text-sm font-bold transition-all duration-300 transform hover:scale-105 active:scale-95";
 
     if (!tile.isRevealed) {
+      let bgClasses = "bg-gradient-to-br from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-slate-300 border-slate-500 shadow-lg";
+
+      // Color code based on Nash strategy recommendation
+      if (tile.strategyRecommendation === 'reveal') {
+        bgClasses = "bg-gradient-to-br from-green-600 to-green-700 hover:from-green-500 hover:to-green-600 text-white border-green-500 shadow-lg";
+      } else if (tile.strategyRecommendation === 'avoid') {
+        bgClasses = "bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white border-red-500 shadow-lg";
+      }
+
       return cn(
         baseClasses,
-        "bg-gradient-to-br from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 text-slate-300 border-slate-500 shadow-lg",
+        bgClasses,
         gameStatus === 'playing' ? "cursor-pointer hover:shadow-xl" : "cursor-not-allowed opacity-75"
       );
     }
